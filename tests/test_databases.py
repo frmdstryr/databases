@@ -4,6 +4,8 @@ import decimal
 import functools
 import os
 import re
+import time
+import warnings
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1172,3 +1174,38 @@ async def test_mapping_property_interface(database_url):
         list_result = await database.fetch_all(query=query)
         assert list_result[0]._mapping["text"] == "example1"
         assert list_result[0]._mapping["completed"] is True
+
+
+@pytest.mark.parametrize("database_url", DATABASE_URLS)
+@pytest.mark.parametrize("mode", ("precompiled", "text", "normal"))
+@async_adapter
+async def test_benchmark_precompiled_query(database_url, mode):
+    """
+    Compare precompiled vs regular queries
+    """
+    async with Database(database_url) as database:
+        query = notes.insert()
+        values = {"text": "example1", "completed": True}
+        await database.execute(query, values)
+
+        query = notes.select()
+        if mode == "precompiled":
+            query = query.compile(dialect=database._backend._dialect)
+        elif mode == "text":
+            query = str(
+                query.compile(
+                    dialect=database._backend._dialect,
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+
+        t1 = time.time()
+        n = 10000
+        for i in range(n):
+            await database.fetch_one(query=query)
+        t2 = time.time()
+        dt = t2 - t1
+        # TODO: This should ideally use pytest-benchmark for now run with -s
+        warnings.warn(
+            f"\nQueries took {round(dt, 3)} seconds {round(n/dt, 3)} q/s ({mode})"
+        )
