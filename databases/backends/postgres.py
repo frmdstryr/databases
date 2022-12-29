@@ -5,6 +5,7 @@ import asyncpg
 from sqlalchemy.dialects.postgresql import pypostgresql
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.sql import ClauseElement
+from sqlalchemy.sql.compiler import Compiled
 from sqlalchemy.sql.ddl import DDLElement
 from sqlalchemy.sql.schema import Column
 from sqlalchemy.types import TypeEngine
@@ -175,7 +176,9 @@ class PostgresConnection(ConnectionBackend):
         self._connection = await self._database._pool.release(self._connection)
         self._connection = None
 
-    async def fetch_all(self, query: ClauseElement) -> typing.List[RecordInterface]:
+    async def fetch_all(
+        self, query: typing.Union[ClauseElement, Compiled]
+    ) -> typing.List[RecordInterface]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, result_columns = self._compile(query)
         rows = await self._connection.fetch(query_str, *args)
@@ -183,7 +186,9 @@ class PostgresConnection(ConnectionBackend):
         column_maps = self._create_column_maps(result_columns)
         return [Record(row, result_columns, dialect, column_maps) for row in rows]
 
-    async def fetch_one(self, query: ClauseElement) -> typing.Optional[RecordInterface]:
+    async def fetch_one(
+        self, query: typing.Union[ClauseElement, Compiled]
+    ) -> typing.Optional[RecordInterface]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, result_columns = self._compile(query)
         row = await self._connection.fetchrow(query_str, *args)
@@ -197,7 +202,7 @@ class PostgresConnection(ConnectionBackend):
         )
 
     async def fetch_val(
-        self, query: ClauseElement, column: typing.Any = 0
+        self, query: typing.Union[ClauseElement, Compiled], column: typing.Any = 0
     ) -> typing.Any:
         # we are not calling self._connection.fetchval here because
         # it does not convert all the types, e.g. JSON stays string
@@ -211,12 +216,14 @@ class PostgresConnection(ConnectionBackend):
             return None
         return row[column]
 
-    async def execute(self, query: ClauseElement) -> typing.Any:
+    async def execute(self, query: typing.Union[ClauseElement, Compiled]) -> typing.Any:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, result_columns = self._compile(query)
         return await self._connection.fetchval(query_str, *args)
 
-    async def execute_many(self, queries: typing.List[ClauseElement]) -> None:
+    async def execute_many(
+        self, queries: typing.List[typing.Union[ClauseElement, Compiled]]
+    ) -> None:
         assert self._connection is not None, "Connection is not acquired"
         # asyncpg uses prepared statements under the hood, so we just
         # loop through multiple executes here, which should all end up
@@ -226,7 +233,7 @@ class PostgresConnection(ConnectionBackend):
             await self._connection.execute(single_query, *args)
 
     async def iterate(
-        self, query: ClauseElement
+        self, query: typing.Union[ClauseElement, Compiled]
     ) -> typing.AsyncGenerator[typing.Any, None]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, result_columns = self._compile(query)
@@ -237,10 +244,16 @@ class PostgresConnection(ConnectionBackend):
     def transaction(self) -> TransactionBackend:
         return PostgresTransaction(connection=self)
 
-    def _compile(self, query: ClauseElement) -> typing.Tuple[str, list, tuple]:
-        compiled = query.compile(
-            dialect=self._dialect, compile_kwargs={"render_postcompile": True}
-        )
+    def _compile(
+        self, query: typing.Union[ClauseElement, Compiled]
+    ) -> typing.Tuple[str, list, tuple]:
+        if isinstance(query, Compiled):
+            compiled = query
+            query = compiled.statement
+        else:
+            compiled = query.compile(
+                dialect=self._dialect, compile_kwargs={"render_postcompile": True}
+            )
 
         if not isinstance(query, DDLElement):
             compiled_params = sorted(compiled.params.items())

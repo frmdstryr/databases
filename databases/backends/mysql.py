@@ -9,6 +9,7 @@ from sqlalchemy.engine.cursor import CursorResultMetaData
 from sqlalchemy.engine.interfaces import Dialect, ExecutionContext
 from sqlalchemy.engine.row import Row
 from sqlalchemy.sql import ClauseElement
+from sqlalchemy.sql.compiler import Compiled
 from sqlalchemy.sql.ddl import DDLElement
 
 from databases.core import LOG_EXTRA, DatabaseURL
@@ -105,7 +106,9 @@ class MySQLConnection(ConnectionBackend):
         await self._database._pool.release(self._connection)
         self._connection = None
 
-    async def fetch_all(self, query: ClauseElement) -> typing.List[Record]:
+    async def fetch_all(
+        self, query: typing.Union[ClauseElement, Compiled]
+    ) -> typing.List[Record]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, context = self._compile(query)
         cursor = await self._connection.cursor()
@@ -126,7 +129,9 @@ class MySQLConnection(ConnectionBackend):
         finally:
             await cursor.close()
 
-    async def fetch_one(self, query: ClauseElement) -> typing.Optional[Record]:
+    async def fetch_one(
+        self, query: typing.Union[ClauseElement, Compiled]
+    ) -> typing.Optional[Record]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, context = self._compile(query)
         cursor = await self._connection.cursor()
@@ -146,7 +151,7 @@ class MySQLConnection(ConnectionBackend):
         finally:
             await cursor.close()
 
-    async def execute(self, query: ClauseElement) -> typing.Any:
+    async def execute(self, query: typing.Union[ClauseElement, Compiled]) -> typing.Any:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, context = self._compile(query)
         cursor = await self._connection.cursor()
@@ -158,7 +163,9 @@ class MySQLConnection(ConnectionBackend):
         finally:
             await cursor.close()
 
-    async def execute_many(self, queries: typing.List[ClauseElement]) -> None:
+    async def execute_many(
+        self, queries: typing.List[typing.Union[ClauseElement, Compiled]]
+    ) -> None:
         assert self._connection is not None, "Connection is not acquired"
         cursor = await self._connection.cursor()
         try:
@@ -169,7 +176,7 @@ class MySQLConnection(ConnectionBackend):
             await cursor.close()
 
     async def iterate(
-        self, query: ClauseElement
+        self, query: typing.Union[ClauseElement, Compiled]
     ) -> typing.AsyncGenerator[typing.Any, None]:
         assert self._connection is not None, "Connection is not acquired"
         query_str, args, context = self._compile(query)
@@ -192,11 +199,15 @@ class MySQLConnection(ConnectionBackend):
         return MySQLTransaction(self)
 
     def _compile(
-        self, query: ClauseElement
+        self, query: typing.Union[ClauseElement, Compiled]
     ) -> typing.Tuple[str, dict, CompilationContext]:
-        compiled = query.compile(
-            dialect=self._dialect, compile_kwargs={"render_postcompile": True}
-        )
+        if isinstance(query, Compiled):
+            compiled = query
+            query = compiled.statement
+        else:
+            compiled = query.compile(
+                dialect=self._dialect, compile_kwargs={"render_postcompile": True}
+            )
 
         execution_context = self._dialect.execution_ctx_cls()
         execution_context.dialect = self._dialect

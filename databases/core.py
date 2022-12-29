@@ -9,6 +9,7 @@ from urllib.parse import SplitResult, parse_qsl, unquote, urlsplit
 
 from sqlalchemy import text
 from sqlalchemy.sql import ClauseElement
+from sqlalchemy.sql.compiler import Compiled
 
 from databases.importer import import_from_string
 from databases.interfaces import DatabaseBackend, Record
@@ -137,7 +138,7 @@ class Database:
 
     async def fetch_all(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.List[Record]:
         async with self.connection() as connection:
@@ -145,7 +146,7 @@ class Database:
 
     async def fetch_one(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.Optional[Record]:
         async with self.connection() as connection:
@@ -153,7 +154,7 @@ class Database:
 
     async def fetch_val(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
         column: typing.Any = 0,
     ) -> typing.Any:
@@ -162,21 +163,21 @@ class Database:
 
     async def execute(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.Any:
         async with self.connection() as connection:
             return await connection.execute(query, values)
 
     async def execute_many(
-        self, query: typing.Union[ClauseElement, str], values: list
+        self, query: typing.Union[ClauseElement, Compiled, str], values: list
     ) -> None:
         async with self.connection() as connection:
             return await connection.execute_many(query, values)
 
     async def iterate(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.AsyncGenerator[typing.Mapping, None]:
         async with self.connection() as connection:
@@ -252,7 +253,7 @@ class Connection:
 
     async def fetch_all(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.List[Record]:
         built_query = self._build_query(query, values)
@@ -261,7 +262,7 @@ class Connection:
 
     async def fetch_one(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.Optional[Record]:
         built_query = self._build_query(query, values)
@@ -270,7 +271,7 @@ class Connection:
 
     async def fetch_val(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
         column: typing.Any = 0,
     ) -> typing.Any:
@@ -280,7 +281,7 @@ class Connection:
 
     async def execute(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.Any:
         built_query = self._build_query(query, values)
@@ -288,7 +289,7 @@ class Connection:
             return await self._connection.execute(built_query)
 
     async def execute_many(
-        self, query: typing.Union[ClauseElement, str], values: list
+        self, query: typing.Union[ClauseElement, Compiled, str], values: list
     ) -> None:
         queries = [self._build_query(query, values_set) for values_set in values]
         async with self._query_lock:
@@ -296,7 +297,7 @@ class Connection:
 
     async def iterate(
         self,
-        query: typing.Union[ClauseElement, str],
+        query: typing.Union[ClauseElement, Compiled, str],
         values: typing.Optional[dict] = None,
     ) -> typing.AsyncGenerator[typing.Any, None]:
         built_query = self._build_query(query, values)
@@ -319,8 +320,11 @@ class Connection:
 
     @staticmethod
     def _build_query(
-        query: typing.Union[ClauseElement, str], values: typing.Optional[dict] = None
-    ) -> ClauseElement:
+        query: typing.Union[ClauseElement, Compiled, str],
+        values: typing.Optional[dict] = None,
+    ) -> typing.Union[ClauseElement, Compiled]:
+        if isinstance(query, Compiled):
+            return query
         if isinstance(query, str):
             query = text(query)
 
